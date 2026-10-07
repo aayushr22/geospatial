@@ -1,0 +1,133 @@
+Build a small backend service called "geo-measure" using FastAPI. It accepts a
+geospatial file, reads its features, and returns measurements.
+
+Write this the way an experienced Python developer would for a take-home: small,
+readable, no extra layers. Prefer fewer files and plain functions over
+abstractions.
+
+## Stack
+- Python 3.11+, FastAPI, uvicorn
+- geopandas (pyogrio engine), shapely, pyproj
+- SQLite through SQLAlchemy 2.x (no migrations, create tables on startup)
+- pytest for tests
+- requirements.txt for dependencies
+
+## Layout
+app/
+  main.py          app setup and routes
+  db.py            engine, session, models
+  schemas.py       pydantic response models
+  reader.py        turning an upload into a GeoDataFrame
+  measure.py       CRS selection and area/length calculation
+tests/
+  test_api.py
+  test_measure.py
+  data/            tiny sample .kml and zipped shapefile
+README.md
+requirements.txt
+
+Don't add more modules than this unless something really needs it.
+
+## Endpoints
+
+POST /api/files/
+- Multipart upload, one file: a .kml, or a .zip containing a shapefile.
+- Reject other extensions with 400. Enforce a max upload size (20 MB).
+- For zips: extract to a temp directory, guard against path traversal, require
+  exactly one .shp plus its .shx and .dbf. Missing parts -> 400 with a clear
+  message.
+- If a shapefile has no .prj, return 400 saying the CRS is missing. KML is
+  always EPSG:4326.
+- Processing happens synchronously in the request. Save a file record with
+  status PROCESSING, then update to COMPLETED or FAILED (with an error
+  message stored).
+- Returns 201 with the same body as the file info endpoint.
+
+GET /api/files/{id}/
+Returns:
+{
+  "id": "abc123",
+  "filename": "survey.kml",
+  "feature_count": 120,
+  "crs": "EPSG:4326",
+  "status": "COMPLETED"
+}
+404 if the id doesn't exist.
+
+GET /api/files/{id}/measurements/
+Returns a list with one entry per feature:
+{
+  "feature_id": 0,
+  "geometry_type": "Polygon",
+  "geometry": { ...GeoJSON in the file's original CRS... },
+  "crs": "EPSG:4326",
+  "properties": { ... },
+  "measurement": { "type": "area", "value": 1234.56, "unit": "m2" },
+  "measurement_crs": "EPSG:32643"
+}
+
+## Measurement rules
+- Polygon / MultiPolygon -> area in square metres
+- LineString / MultiLineString -> length in metres
+- Point / MultiPoint -> measurement is null
+- Anything else (GeometryCollection, empty or null geometry) -> measurement is
+  null, plus a short "note" field saying why. Never raise for these.
+
+## CRS handling
+- Never measure in degrees.
+- If the source CRS is geographic, pick the UTM zone from each feature's
+  centroid (pyproj.database.query_utm_crs_info), reproject that one geometry,
+  then measure. Doing it per feature keeps files that span several zones
+  accurate.
+- If the source CRS is already projected with metre units, measure directly.
+  If it is projected in other units (e.g. feet), go through EPSG:4326 and use
+  the same UTM path.
+- Always use always_xy=True on transformers.
+
+## Storage
+Two tables: files (id as short uuid hex, filename, crs, feature_count, status,
+error, created_at) and features (file_id, feature index, geometry_type,
+geometry as GeoJSON text, properties as JSON, measurement type/value/unit,
+measurement_crs, note). Uploaded files are not kept after processing.
+
+## Tests
+A handful of focused tests, not exhaustive coverage:
+- uploading the sample KML and the sample zipped shapefile works end to end
+- a 1 km x 1 km square near the equator in EPSG:4326 measures within 1% of
+  1,000,000 m2
+- a known line length is within 1%
+- points return null measurement
+- unsupported extension and zip without a .shp both return 400
+- unknown id returns 404
+
+## README.md
+Sections: Setup, API (each endpoint with a curl example and sample response),
+Architecture (structure, file-processing flow, measurement flow, CRS handling),
+Design Decisions. In Design Decisions, cover briefly and honestly:
+- FastAPI vs Django + DRF
+- per-feature UTM vs one projection per file vs geodesic measurement with
+  pyproj.Geod vs an equal-area projection, and the trade-offs of the choice
+- synchronous processing vs a background task/queue
+- SQLite vs Postgres/PostGIS
+- known limitations (features near poles or crossing UTM zone boundaries,
+  large files, no auth)
+
+## Code style
+- Write code that reads like one person wrote it in a couple of evenings.
+- Comments only where the reason isn't obvious from the code. No comments
+  that restate the line below them. No section banner comments.
+- Short docstrings only on functions whose behaviour isn't clear from the
+  name. No docstrings on routes or trivial helpers.
+- Type hints on function signatures, nothing elaborate.
+- No base classes, service/repository layers, factories, or config
+  frameworks. No custom exception hierarchy; one small error class is enough.
+- Catch specific exceptions where they can actually happen. No blanket
+  try/except around whole functions.
+- Plain, specific names. Error messages short and factual.
+- README in plain prose, first person where natural, no emojis, no badges, no
+  marketing words like "robust", "seamless", "comprehensive" or "powerful".
+  Keep it under about 250 lines.
+- Don't add anything that wasn't asked for: no Docker, CI, auth, logging
+  setup, pagination, or extra endpoints.
+
+When finished, run the tests and fix failures before stopping.

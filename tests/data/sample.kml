@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>sample</name>
+    <Placemark>
+      <name>square</name>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>3,0 3.009,0 3.009,0.009 3,0.009 3,0</coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+    <Placemark>
+      <name>line</name>
+      <LineString>
+        <coordinates>3,0 3.009,0</coordinates>
+      </LineString>
+    </Placemark>
+    <Placemark>
+      <name>point</name>
+      <Point>
+        <coordinates>3,0</coordinates>
+      </Point>
+    </Placemark>
+  </Document>
+</kml>
